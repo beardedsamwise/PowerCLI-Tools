@@ -5,8 +5,11 @@ function Move-VMtoHostandSwitch {
     It is assumed that all Port Proups have identical names on the source and destination virtual switches
     This function was created to assist with moving virtual hosts from one vCenter to another where the dvSwitch must be removed from the ESXi host
     The migration scenario for this script is where the virtual machines cannot be moved from a dvSwitch to a vSwitch on the same host easily 
+    NOTE: Currently this function only supports virtual machines with a single NIC 
     .EXAMPLE
-    Move-VMtoHostandSwitch -SourceHost esx01 -DestHost esx02 -TestVM test01 -WhatIf
+    Move-VMtoHostandSwitch -SourceHost esx01 -DestHost esx02 -DestSwitch vSwitch0 -TestVM test01 
+    Move-VMtoHostandSwitch -SourceHost esx01 -DestHost esx02 -DestSwitch vSwitch0 -WhatIf
+    Move-VMtoHostandSwitch -SourceHost esx01 -DestHost esx02 -DestSwitch vSwitch0 
     #>
     [CmdletBinding()]
     [Alias()]
@@ -38,6 +41,7 @@ function Move-VMtoHostandSwitch {
         [switch]$WhatIf
     ) 
 
+    # Check to see if virtual hosts and vSwitch are valid 
     try {
         Get-VMHost $sourcehost -ErrorAction Stop | Out-Null
         Get-VMHost $desthost -ErrorAction Stop | Out-Null
@@ -48,17 +52,21 @@ function Move-VMtoHostandSwitch {
         exit
     }
 
+    # Get single virtual machine if -TestVM is passed
     if ($TestVM) {
         $vms = get-vm $TestVM # get only one virtual machine is $TestVM is $true
     }
+    # Otherwise get all virtual machines on the source host
     else {
         $vms = get-vmhost $sourcehost | get-vm | where-object {$_.Name -notmatch "vCLS"} # get all virtual machines on source host, exclude vCLS on vSphere 7.0
     }
 
     $manuallymove = @() # create empty array to store virtual machines that need to be manually moved later  
 
+    # If -WhatIf is passed, inform user that What-If has been enabled 
     if ($WhatIf) {Write-Host "*** What-If Mode Enabled ***" -foregroundcolor Yellow}
 
+    # Loop through each virtual machine and migrate the virtual machine if only one NIC is attached 
     foreach ($vm in $vms) {
         $netadap = get-networkadapter $vm # get current vm network adapter 
         $totalnetadap = $netadap | measure-object # get total network adapters on current virtual machine
@@ -79,14 +87,16 @@ function Move-VMtoHostandSwitch {
         }
     }
 
-    # return results if any virtual machines have multiple nics and need to be moved manually, if none report all vms have been moved
-    if ($testvm) {
+    # If Test-VM is passed, inform the user the test has completed
+    if ($testvm) { 
         write-host -foregroundcolor Green "*Test Mode Complete*"
     }
+    # If any virtual machines have multiple NICs, report these 
     elseif ($manuallymove) {
         Write-Host -foregroundcolor Magenta "The following virtual machines must be moved manually as they have multiple NICs"
         $manuallymove
     }
+    # Otherwise, inform the user that all virtual machines were moved
     else {
         write-host -foregroundcolor Green "All virtual machines were moved off the source host!!"
     }
