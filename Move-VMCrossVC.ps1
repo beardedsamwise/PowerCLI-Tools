@@ -7,7 +7,7 @@ function Move-VMCrossVC {
 
     If you'd like to move only a single virtual machine specify the -SingleVM parameter and the name of a virtual machine.
 
-    For testing, pass the -WhatIf parameter and the fucntion will enable -WhatIf on the Move-VM task. 
+    For testing, pass the -DryRun parameter and the function will enable -WhatIf on the Move-VM task. 
     .EXAMPLE
     Move-VMCrossVC -SourceHost esxi02.test.lab -DestHost esxi03.test.lab -sourcevCenter vc01 -DestvCenter vc02 -DestDVSwitch dswitch
     #>
@@ -48,7 +48,7 @@ function Move-VMCrossVC {
         #Specify if Move-VM should be run with -WhatIf parameter
         [Parameter(Mandatory = $false,
             Position = 6)]
-        [switch]$WhatIf
+        [switch]$DryRun
     )   
     # Error handling, check that hosts and dvSwitches exist 
     try {
@@ -57,7 +57,29 @@ function Move-VMCrossVC {
         Get-VDSwitch -Name $DestDVSwitch -Server $DestvCenter -ErrorAction Stop | Out-Null
     }
     catch {
-        Write-Host "One or more of your input values could not be validated. Check SourceHost, DestHost and DestDVSwitch parameters" -foregroundcolor Red
+        Write-Host "ERROR: One or more of your input values could not be validated." -foregroundcolor Red
+        Write-Host $_
+        exit
+    }
+
+    # If a Single Virtual machine is specfied, check that it exists then save it in a variable, otherwise throw error and exit
+    # Else, get all virtual machines from the source ESXi host 
+    if ($SingleVM) {
+        try {
+            $vms = get-vmhost $sourcehost | get-vm $SingleVM -ErrorAction Stop # get only one virtual machine is $SingleVM is $true
+        }
+        catch {
+            Write-Host "The test virtual machine $SingleVM was not found on $SourceHost" -foregroundcolor Red
+            exit
+        }    
+    }
+    else {
+        $vms = get-vmhost $sourcehost | get-vm | where-object {$_.Name -notmatch "vCLS"} # get all virtual machines on source host, exclude vCLS on vSphere 7.0
+    }
+
+    # Check to see if virtual machines were found
+    if ($vms -eq $null){
+        Write-Host -foregroundcolor Red "ERROR: No virtual machines were found with the specified parameters."
         exit
     }
     # Check both vCenter Servers for duplicate folder names
@@ -77,23 +99,9 @@ function Move-VMCrossVC {
         }
     }
 
-    # If a Single Virtual machine is specfied, check that it exists then save it in a variable, otherwise throw error and exit
-    # Else, get all virtual machines from the source ESXi host 
-    if ($SingleVM) {
-        try {
-            $vms = get-vmhost $sourcehost | get-vm $SingleVM -ErrorAction Stop # get only one virtual machine is $SingleVM is $true
-        }
-        catch {
-            Write-Host "The test virtual machine $SingleVM was not found on $SourceHost" -foregroundcolor Red
-            exit
-        }    
-    }
-    else {
-        $vms = get-vmhost $sourcehost | get-vm | where-object {$_.Name -notmatch "vCLS"} # get all virtual machines on source host, exclude vCLS on vSphere 7.0
-    }
-
     # Execute Move-VM for each virtual machine in $vms
-    Write-Host -foregroundcolor Green "Beginning Cross vCenter vMotion of virtual machines..."
+    if ($DryRun) {Write-Host -foregroundcolor Magenta "Dry run enabled, passing -WhatIf to Move-VM, no virtual machines will be moved"}
+    else {Write-Host -foregroundcolor Green "Beginning Cross vCenter vMotion of virtual machines..."}
     foreach ($vm in $vms) {
         $SourceNetworkAdapters = get-networkadapter $vm # get current vm network adapter 
         # Since datastore clusters are unsupported for Cross VC vMotion, get the datastore with the most amount of free space
@@ -103,7 +111,8 @@ function Move-VMCrossVC {
             $Datastore = get-datastorecluster -name $DatastoreCluster.name -server $DestvCenter | get-datastore | Sort-Object -Property FreeSpaceGB -Descending | Select-Object -First 1 
         }
         catch {
-            $Datastore = get-vm $vm -server $SourcevCenter | get-datastore -server $SourcevCenter            
+            $Datastore = get-vm $vm -server $SourcevCenter | get-datastore -server $SourcevCenter
+            $Datastore = get-datastore $Datastore.Name -server $DestvCenter            
         }
         # Migrate the virtual machines!! 
         Write-Host -foregroundcolor Green "Migrating $vm to $desthost on switch $destdvSwitch from $sourcehost"
@@ -114,9 +123,9 @@ function Move-VMCrossVC {
             Write-Host "Moving"  $networkAdapter.name "from" $networkAdapter.NetworkName "to" $PortGroup
             $DestPortGroups += $PortGroup
         }
-        # Execute Move-VM using What-If if specified then move the virtual machine to it's original VM folder location 
-        move-vm -vm $vm -NetworkAdapter $SourceNetworkAdapters -PortGroup $DestPortGroups -destination $VMHost -datastore $Datastore -whatif:$whatIf | Out-Null
-        if ($WhatIF -eq $false) {
+        # Execute Move-VM using What-If if DrynRun specified then move the virtual machine to it's original VM folder location 
+        move-vm -vm $vm -NetworkAdapter $SourceNetworkAdapters -PortGroup $DestPortGroups -destination $VMHost -datastore $Datastore -whatif:$DryRun | Out-Null
+        if ($DryRun -eq $false) {
             Write-Host "Moving" $vm.name "to folder:" $vm.Folder.Name
             get-vm $vm.name -server $DestvCenter | move-vm -InventoryLocation $vm.folder.Name | Out-Null
         }
