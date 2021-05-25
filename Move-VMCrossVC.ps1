@@ -110,7 +110,7 @@ function Move-VMCrossVC {
         }
     }
 
-    # Execute Move-VM for each virtual machine in $vms
+    # Begin moving virtual machines using Move-VM 
     if ($DryRun) { Write-Host -foregroundcolor Magenta "Dry run enabled, passing -WhatIf to Move-VM, no virtual machines will be moved" }
     else { Write-Host -foregroundcolor Green "Beginning Cross vCenter vMotion of virtual machines..." }
     foreach ($vm in $vms) {
@@ -128,7 +128,7 @@ function Move-VMCrossVC {
             }
             catch {
                 # If a virtual machine has more than one VMDK and there's no datastore clusters, skip virtual machine and begin next loop 
-                Write-Host "Moving virtual machine with < 1 VMDK without datastore clusters is risky, skipping virtual machine" $vm.Name -foregroundcolor Red
+                Write-Host "Moving virtual machine with > 1 VMDK without datastore clusters is risky, skipping virtual machine" $vm.Name -foregroundcolor Red
                 Continue
             }
         }
@@ -139,7 +139,7 @@ function Move-VMCrossVC {
         }
         # Make sure there is at least 100GB free on the target datastore before migration
         if ($Datastore.FreeSpaceGB - ($vm.MemoryGB + $vm.UsedSpaceGB) -lt 100) {
-            Write-Host "Not enough free space on target datastore" $Datastore.name ", there must be a minimum of 100GB free space after the migration" -ForegroundColor Red
+            Write-Host "Not enough free space on target datastore" $Datastore.name", there must be a minimum of 100GB free space after the migration" -ForegroundColor Red
             Write-Host "Skipping virtual machine:" $vm.Name -ForegroundColor Red
             Continue
         }
