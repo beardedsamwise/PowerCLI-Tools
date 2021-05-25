@@ -83,7 +83,7 @@ function Move-VMCrossVC {
     }
 
     # Check to see if virtual machines were found
-    if ($vms -eq $null) {
+    if ($null -eq $vms) {
         Write-Host -foregroundcolor Red "ERROR: No virtual machines were found with the specified parameters."
         exit
     }
@@ -103,6 +103,8 @@ function Move-VMCrossVC {
             Else {
                 write-host -foregroundcolor Red "Duplicate folders found on $server in $dc, exiting..."
                 write-host "To avoid virtual machines ending up in the wrong folder, folder names must be unique!"
+                write-host "Found folders:"
+                $AllFolders.parent
                 exit
             }
         }
@@ -115,13 +117,31 @@ function Move-VMCrossVC {
         $SourceNetworkAdapters = get-networkadapter $vm # get current vm network adapter 
         # Since datastore clusters are unsupported for Cross VC vMotion, get the datastore with the most amount of free space
         # If the virtual machine is not in a datastore cluster, get a single datastore (keeping in mind it may span multiple datastores but we'll only return the main datastore)
-        try {
-            $DatastoreCluster = get-vm $vm -server $SourcevCenter | get-datastore -server $SourcevCenter | get-datastorecluster -server $SourcevCenter -erroraction stop 
-            $Datastore = get-datastorecluster -name $DatastoreCluster.name -server $DestvCenter | get-datastore | Sort-Object -Property FreeSpaceGB -Descending | Select-Object -First 1 
+        $numDisks = get-vm $vm -server $SourcevCenter | get-harddisk | measure-object
+        if ($numDisks.count -gt 1) {
+            # Check if virtual machine has more than one VMDK
+            try {
+                # Try to get the datastore with the most free space in the datastore cluster
+                $DatastoreCluster = get-vm $vm -server $SourcevCenter | get-datastore -server $SourcevCenter | get-datastorecluster -server $SourcevCenter -erroraction stop 
+                $Datastore = get-datastorecluster -name $DatastoreCluster.name -server $DestvCenter | get-datastore | Sort-Object -Property FreeSpaceGB -Descending | Select-Object -First 1 
+                # TO DO - Sanity check free space on datastore before moving! 
+            }
+            catch {
+                # If a virtual machine has more than one VMDK and there's no datastore clusters, skip virtual machine and begin next loop 
+                Write-Host "Moving virtual machine with < 1 VMDK without datastore clusters is risky, skipping virtual machine" $vm.Name -foregroundcolor Red
+                Continue
+            }
         }
-        catch {
+        else {
+            # If virtual machine only has one VMDK, we'll get the same datastore that the virtual machine currently resides in 
             $Datastore = get-vm $vm -server $SourcevCenter | get-datastore -server $SourcevCenter
             $Datastore = get-datastore $Datastore.Name -server $DestvCenter            
+        }
+        # Make sure there is at least 100GB free on the target datastore before migration
+        if ($Datastore.FreeSpaceGB - ($vm.MemoryGB + $vm.UsedSpaceGB) -lt 100) {
+            Write-Host "Not enough free space on target datastore" $Datastore.name ", there must be a minimum of 100GB free space after the migration" -ForegroundColor Red
+            Write-Host "Skipping virtual machine:" $vm.Name -ForegroundColor Red
+            Continue
         }
         # Migrate the virtual machines!! 
         Write-Host -foregroundcolor Green "Migrating $vm to $desthost on switch $destdvSwitch from $sourcehost"
