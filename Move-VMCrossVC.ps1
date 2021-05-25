@@ -103,8 +103,6 @@ function Move-VMCrossVC {
             Else {
                 write-host -foregroundcolor Red "Duplicate folders found on $server in $dc, exiting..."
                 write-host "To avoid virtual machines ending up in the wrong folder, folder names must be unique!"
-                write-host "Found folders:"
-                $AllFolders.parent
                 exit
             }
         }
