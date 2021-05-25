@@ -124,7 +124,6 @@ function Move-VMCrossVC {
                 # Try to get the datastore with the most free space in the datastore cluster
                 $DatastoreCluster = get-vm $vm -server $SourcevCenter | get-datastore -server $SourcevCenter | get-datastorecluster -server $SourcevCenter -erroraction stop 
                 $Datastore = get-datastorecluster -name $DatastoreCluster.name -server $DestvCenter | get-datastore | Sort-Object -Property FreeSpaceGB -Descending | Select-Object -First 1 
-                # TO DO - Sanity check free space on datastore before moving! 
             }
             catch {
                 # If a virtual machine has more than one VMDK and there's no datastore clusters, skip virtual machine and begin next loop 
